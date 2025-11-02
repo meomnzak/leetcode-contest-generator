@@ -5,7 +5,7 @@
     "updated": "2025-11-03"
   },
   "weights": { "easy": 1, "medium": 3, "hard": 1 },
-  "defaultContest": { "durationMinutes": 90, "problems": 4, "mix": { "easy": 1, "medium": 2, "hard": 1 } },
+  "defaultContest": { "durationMinutes": 90, "problems": 4, "mix": { "easy": 1, "medium": 3} },
   "problems": [
     { "slug": "unique-email-addresses", "difficulty": "easy" },
     { "slug": "odd-even-jump", "difficulty": "hard" },
