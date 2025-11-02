@@ -1,28 +1,48 @@
+// app.js
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOM fully loaded and parsed');
 
-  document.querySelector('.start-button').addEventListener('click', startContest);
-  document.querySelector('.regenerate-button').addEventListener('click', regenerateContest);
-  document.querySelector('.end-button').addEventListener('click', endContest);
+  const startBtn = document.querySelector('.start-button');
+  const regenBtn = document.querySelector('.regenerate-button');
+  const endBtn   = document.querySelector('.end-button');
+
+  startBtn?.addEventListener('click', () => {
+    startBtn.disabled = true;
+    startContest();
+  });
+  regenBtn?.addEventListener('click', regenerateContest);
+  endBtn?.addEventListener('click', endContest);
+
+  // Try to restore an in-progress timer if page reloaded
+  restoreTimer();
 });
 
 let timerInterval;
-let totalTime = 60; // Default timer duration in minutes
+let totalTime = 60; // minutes default
+const DATA_PATH   = 'data/google_pool.json';
+const RECENT_KEY  = 'recentPickedSlugs';
+const RECENT_LIMIT = 50; // remember last N problems to avoid repeats
+const END_AT_KEY   = 'contestEndAt';
 
 function startContest() {
   console.log('Starting the contest...');
   loadQuestions();
-  
+
   // Hide the start button and duration input
-  document.querySelector('.start-button').style.display = 'none';
-  document.querySelector('.input-container').style.display = 'none';
-  
+  const startBtn = document.querySelector('.start-button');
+  const inputBox = document.querySelector('.input-container');
+  if (startBtn) startBtn.style.display = 'none';
+  if (inputBox) inputBox.style.display = 'none';
+
   // Show the regenerate and end buttons
-  document.querySelector('.regenerate-button').style.display = 'inline-block';
-  document.querySelector('.end-button').style.display = 'inline-block';
+  const regenBtn = document.querySelector('.regenerate-button');
+  const endBtn   = document.querySelector('.end-button');
+  if (regenBtn) regenBtn.style.display = 'inline-block';
+  if (endBtn)   endBtn.style.display   = 'inline-block';
 
   // Show the timer and start it
-  document.querySelector('.timer').classList.remove('hidden');
+  const timerWrap = document.querySelector('.timer');
+  timerWrap?.classList.remove('hidden');
   startTimer();
 }
 
@@ -33,90 +53,95 @@ function regenerateContest() {
 
 function endContest() {
   console.log('Ending the contest...');
-  
+
   // Show the start button and duration input
-  document.querySelector('.start-button').style.display = 'inline-block';
-  document.querySelector('.input-container').style.display = 'block';
-  
+  const startBtn = document.querySelector('.start-button');
+  const inputBox = document.querySelector('.input-container');
+  if (startBtn) {
+    startBtn.style.display = 'inline-block';
+    startBtn.disabled = false;
+  }
+  if (inputBox) inputBox.style.display = 'block';
+
   // Hide the regenerate and end buttons
-  document.querySelector('.regenerate-button').style.display = 'none';
-  document.querySelector('.end-button').style.display = 'none';
-  
+  const regenBtn = document.querySelector('.regenerate-button');
+  const endBtn   = document.querySelector('.end-button');
+  if (regenBtn) regenBtn.style.display = 'none';
+  if (endBtn)   endBtn.style.display   = 'none';
+
   // Hide the timer and stop it
-  document.querySelector('.timer').classList.add('hidden');
+  const timerWrap = document.querySelector('.timer');
+  timerWrap?.classList.add('hidden');
   stopTimer();
-  
+  localStorage.removeItem(END_AT_KEY);
+
   // Clear the questions
-  document.querySelector('.question-list').innerHTML = '';
+  const qList = document.querySelector('.question-list');
+  if (qList) qList.innerHTML = '';
 }
 
 function loadQuestions() {
   console.log('Loading questions...');
-  fetch('data/questions.json')
-      .then(response => {
-          console.log('Fetch response:', response);
-          return response.json();
-      })
-      .then(data => {
-          console.log('Questions data:', data);
-          const easyQuestions = data.filter(q => q.difficulty === 'EASY');
-          const mediumQuestions = data.filter(q => q.difficulty === 'MEDIUM');
-          const hardQuestions = data.filter(q => q.difficulty === 'HARD');
-          
-          console.log('Easy questions:', easyQuestions);
-          console.log('Medium questions:', mediumQuestions);
-          console.log('Hard questions:', hardQuestions);
-          
-          const easyQuestion = getRandomQuestions(easyQuestions, 1);
-          const mediumQuestionsSelected = getRandomQuestions(mediumQuestions, 2);
-          const hardQuestion = getRandomQuestions(hardQuestions, 1);
-          
-          const questionList = [...easyQuestion, ...mediumQuestionsSelected, ...hardQuestion];
-          console.log('Selected questions:', questionList);
-          
-          const formattedQuestions = questionList.map(q => ({
-              title: q.title,
-              url: `https://leetcode.com/problems/${q.titleSlug}/` // Correct URL construction
-          }));
-          
-          console.log('Formatted questions:', formattedQuestions);
-          displayQuestions(formattedQuestions);
-      })
-      .catch(error => console.error('Error loading questions:', error));
+  fetch(DATA_PATH)
+    .then(response => {
+      if (!response.ok) throw new Error(`Failed to fetch ${DATA_PATH}`);
+      return response.json();
+    })
+    .then(data => {
+      const pool = Array.isArray(data) ? data : data.problems || [];
+      if (!pool.length) throw new Error('Empty problems pool');
+
+      const recent = new Set(getRecent());
+
+      const easy   = pool.filter(q => q.difficulty === 'easy'   && !recent.has(q.slug));
+      const medium = pool.filter(q => q.difficulty === 'medium' && !recent.has(q.slug));
+      const hard   = pool.filter(q => q.difficulty === 'hard'   && !recent.has(q.slug));
+
+      // Fallback if we filtered out too many due to 'recent'
+      const ePick = sampleUnique(easy.length ? easy : pool.filter(q => q.difficulty === 'easy'), 1);
+      const mPick = sampleUnique(medium.length ? medium : pool.filter(q => q.difficulty === 'medium'), 2);
+      const hPick = sampleUnique(hard.length ? hard : pool.filter(q => q.difficulty === 'hard'), 1);
+
+      const picks = shuffle([...ePick, ...mPick, ...hPick]);
+
+      saveRecent(picks.map(p => p.slug));
+
+      const formatted = picks.map(q => ({
+        title: slugToTitle(q.slug),
+        url: `https://leetcode.com/problems/${q.slug}/`,
+        difficulty: q.difficulty
+      }));
+
+      displayQuestions(formatted);
+    })
+    .catch(error => console.error('Error loading questions:', error));
 }
 
 function displayQuestions(questions) {
   console.log('Displaying questions:', questions);
   const questionListDiv = document.querySelector('.question-list');
+  if (!questionListDiv) return;
   questionListDiv.innerHTML = '';
-  
-  questions.forEach((q, index) => {
-      console.log('Creating question item:', q);
-      const questionItem = document.createElement('div');
-      questionItem.className = 'question-item';
-      
-      const questionLink = document.createElement('a');
-      questionLink.href = q.url;
-      questionLink.target = '_blank';
-      questionLink.textContent = q.title;
-      
-      const markButton = document.createElement('button');
-      markButton.className = 'tick-button';
-      markButton.textContent = 'Mark as Solved';
-      markButton.onclick = () => toggleSolved(index);
 
-            // Add a class based on index (for demonstration, adjust as needed)
-      if (index === 0) {
-        questionLink.className = 'easy';
-      } else if (index === 1 || index === 2) {
-        questionLink.className = 'medium';
-      } else {
-        questionLink.className = 'hard';
-      }
-      
-      questionItem.appendChild(questionLink);
-      questionItem.appendChild(markButton);
-      questionListDiv.appendChild(questionItem);
+  questions.forEach((q, index) => {
+    const item = document.createElement('div');
+    item.className = 'question-item';
+
+    const link = document.createElement('a');
+    link.href = q.url;
+    link.target = '_blank';
+    link.textContent = q.title;
+    link.rel = 'noopener noreferrer';
+    link.classList.add(q.difficulty); // "easy" | "medium" | "hard" for CSS
+
+    const markButton = document.createElement('button');
+    markButton.className = 'tick-button';
+    markButton.textContent = 'Mark as Solved';
+    markButton.onclick = () => toggleSolved(index);
+
+    item.appendChild(link);
+    item.appendChild(markButton);
+    questionListDiv.appendChild(item);
   });
 }
 
@@ -124,42 +149,109 @@ function toggleSolved(index) {
   console.log('Toggling solved state for question index:', index);
   const questions = document.querySelectorAll('.question-item');
   const question = questions[index];
-  if (question.classList.contains('solved')) {
-      question.classList.remove('solved');
-  } else {
-      question.classList.add('solved');
-  }
+  if (!question) return;
+  question.classList.toggle('solved');
 }
 
-function getRandomQuestions(questions, count) {
-  console.log('Shuffling and selecting questions...');
-  const shuffled = questions.sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
+/* ---------- Utilities ---------- */
+
+function slugToTitle(slug) {
+  return slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Fisher–Yates unique sample; throws if k > arr.length
+function sampleUnique(arr, k) {
+  if (k > arr.length) throw new Error('Not enough items to sample');
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, k);
+}
+
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveRecent(slugs) {
+  const recent = [...slugs, ...getRecent()];
+  // keep unique, maintain order (newest first)
+  const uniq = [];
+  const seen = new Set();
+  for (const s of recent) {
+    if (!seen.has(s)) {
+      uniq.push(s);
+      seen.add(s);
+    }
+  }
+  localStorage.setItem(RECENT_KEY, JSON.stringify(uniq.slice(0, RECENT_LIMIT)));
+}
+
+/* ---------- Timer ---------- */
 
 function startTimer() {
   const durationInput = document.getElementById('duration');
-  totalTime = parseInt(durationInput.value) || 60; // Default to 60 minutes if input is invalid
-  let time = totalTime * 60; // Convert minutes to seconds
-  updateTimerDisplay(time);
+  totalTime = parseInt(durationInput?.value, 10);
+  if (Number.isNaN(totalTime) || totalTime <= 0) totalTime = 60;
 
-  timerInterval = setInterval(() => {
-      if (time <= 0) {
-          clearInterval(timerInterval);
-          alert('Time is up!');
-      } else {
-          time--;
-          updateTimerDisplay(time);
-      }
-  }, 1000);
+  const endAt = Date.now() + totalTime * 60 * 1000;
+  localStorage.setItem(END_AT_KEY, String(endAt));
+  runTimer(endAt);
 }
 
-function updateTimerDisplay(time) {
-  const minutes = String(Math.floor(time / 60)).padStart(2, '0');
-  const seconds = String(time % 60).padStart(2, '0');
-  document.getElementById('timer').textContent = `${minutes}:${seconds}`;
+function runTimer(endAt) {
+  stopTimer(); // ensure single interval
+  updateTimerDisplay(Math.max(0, Math.floor((endAt - Date.now())/1000)));
+
+  timerInterval = setInterval(() => {
+    const remaining = Math.max(0, Math.floor((endAt - Date.now())/1000));
+    updateTimerDisplay(remaining);
+    if (remaining === 0) {
+      stopTimer();
+      alert('Time is up!');
+    }
+  }, 1000);
+
+  const timerWrap = document.querySelector('.timer');
+  timerWrap?.classList.remove('hidden');
+}
+
+function restoreTimer() {
+  const endRaw = localStorage.getItem(END_AT_KEY);
+  const endAt = endRaw ? Number(endRaw) : NaN;
+  if (!Number.isNaN(endAt) && endAt > Date.now()) {
+    runTimer(endAt);
+    // Also ensure UI state matches "in contest"
+    const startBtn = document.querySelector('.start-button');
+    const inputBox = document.querySelector('.input-container');
+    const regenBtn = document.querySelector('.regenerate-button');
+    const endBtn   = document.querySelector('.end-button');
+    if (startBtn) startBtn.style.display = 'none';
+    if (inputBox) inputBox.style.display = 'none';
+    if (regenBtn) regenBtn.style.display = 'inline-block';
+    if (endBtn)   endBtn.style.display   = 'inline-block';
+  }
+}
+
+function updateTimerDisplay(seconds) {
+  const mm = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const ss = String(seconds % 60).padStart(2, '0');
+  const el = document.getElementById('timer');
+  if (el) el.textContent = `${mm}:${ss}`;
 }
 
 function stopTimer() {
-  clearInterval(timerInterval);
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = undefined;
 }
