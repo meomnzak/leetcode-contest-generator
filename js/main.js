@@ -19,8 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let timerInterval;
 let totalTime = 60; // minutes default
-const DATA_PATH   = 'data/google_pool.json';
-const RECENT_KEY  = 'recentPickedSlugs';
+const DATA_PATH    = 'data/google_pool.json';
+const RECENT_KEY   = 'recentPickedSlugs';
 const RECENT_LIMIT = 50; // remember last N problems to avoid repeats
 const END_AT_KEY   = 'contestEndAt';
 
@@ -88,25 +88,54 @@ function loadQuestions() {
       return response.json();
     })
     .then(data => {
-      const pool = Array.isArray(data) ? data : data.problems || [];
-      if (!pool.length) throw new Error('Empty problems pool');
+      // Support both { problems: [...] } and a plain array
+      const allRaw = (Array.isArray(data) ? data : data.problems) || [];
+      if (!allRaw.length) throw new Error('Empty problems pool');
+
+      // Read desired mix from JSON; fallback to 2E-2M-0H
+      const mix = (data.defaultContest && data.defaultContest.mix) || { easy: 2, medium: 2, hard: 0 };
+
+      // Normalize difficulties to lower-case
+      const pool = allRaw.map(p => ({
+        ...p,
+        difficulty: String(p.difficulty || '').toLowerCase()
+      }));
 
       const recent = new Set(getRecent());
 
-      const easy   = pool.filter(q => q.difficulty === 'easy'   && !recent.has(q.slug));
-      const medium = pool.filter(q => q.difficulty === 'medium' && !recent.has(q.slug));
-      const hard   = pool.filter(q => q.difficulty === 'hard'   && !recent.has(q.slug));
+      // Exclude recently used problems
+      const buckets = {
+        easy:   pool.filter(q => q.difficulty === 'easy'   && !recent.has(q.slug)),
+        medium: pool.filter(q => q.difficulty === 'medium' && !recent.has(q.slug)),
+        hard:   pool.filter(q => q.difficulty === 'hard'   && !recent.has(q.slug)),
+      };
 
-      // Fallback if we filtered out too many due to 'recent'
-      const ePick = sampleUnique(easy.length ? easy : pool.filter(q => q.difficulty === 'easy'), 1);
-      const mPick = sampleUnique(medium.length ? medium : pool.filter(q => q.difficulty === 'medium'), 2);
-      const hPick = sampleUnique(hard.length ? hard : pool.filter(q => q.difficulty === 'hard'), 1);
+      // Fallbacks if a bucket is temporarily exhausted by 'recent'
+      const ensure = (diff, k) => {
+        if (!k) return [];
+        const filtered = buckets[diff];
+        if (filtered.length >= k) return sampleUnique(filtered, k);
+        // fallback: sample from whole pool for that difficulty
+        const allByDiff = pool.filter(q => q.difficulty === diff);
+        if (allByDiff.length < k) {
+          throw new Error(`Requested ${k} ${diff} but only ${allByDiff.length} available.`);
+        }
+        return sampleUnique(allByDiff, k);
+      };
 
-      const picks = shuffle([...ePick, ...mPick, ...hPick]);
+      const picks = [
+        ...ensure('easy',   mix.easy   || 0),
+        ...ensure('medium', mix.medium || 0),
+        ...ensure('hard',   mix.hard   || 0),
+      ];
 
-      saveRecent(picks.map(p => p.slug));
+      // Shuffle final order to avoid grouped difficulties
+      const final = shuffle(picks);
 
-      const formatted = picks.map(q => ({
+      // Save recent
+      saveRecent(final.map(p => p.slug));
+
+      const formatted = final.map(q => ({
         title: slugToTitle(q.slug),
         url: `https://leetcode.com/problems/${q.slug}/`,
         difficulty: q.difficulty
@@ -114,7 +143,10 @@ function loadQuestions() {
 
       displayQuestions(formatted);
     })
-    .catch(error => console.error('Error loading questions:', error));
+    .catch(error => {
+      console.error('Error loading questions:', error);
+      alert('Could not load questions. Check console & JSON format.');
+    });
 }
 
 function displayQuestions(questions) {
@@ -132,7 +164,7 @@ function displayQuestions(questions) {
     link.target = '_blank';
     link.textContent = q.title;
     link.rel = 'noopener noreferrer';
-    link.classList.add(q.difficulty); // "easy" | "medium" | "hard" for CSS
+    link.classList.add(q.difficulty); // "easy" | "medium" | "hard"
 
     const markButton = document.createElement('button');
     markButton.className = 'tick-button';
@@ -170,6 +202,7 @@ function shuffle(arr) {
 
 // Fisher–Yates unique sample; throws if k > arr.length
 function sampleUnique(arr, k) {
+  if (!k) return [];
   if (k > arr.length) throw new Error('Not enough items to sample');
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
