@@ -1,4 +1,4 @@
-// app.js
+// js/app.js
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOM fully loaded and parsed');
 
@@ -19,17 +19,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let timerInterval;
 let totalTime = 60; // minutes default
+let currentMix = null; // store per-contest mix chosen by user
+
 const DATA_PATH    = 'data/google_pool.json';
 const RECENT_KEY   = 'recentPickedSlugs';
 const RECENT_LIMIT = 50; // remember last N problems to avoid repeats
 const END_AT_KEY   = 'contestEndAt';
 
+/* ---------- Contest Flow ---------- */
+
 function startContest() {
   console.log('Starting the contest...');
-  loadQuestions();
+
+  const startBtn = document.querySelector('.start-button');
+
+  // NEW: read mix from input fields (easy / medium / hard)
+  const mix = readMixFromInputs();
+  currentMix = mix;
+
+  loadQuestions(currentMix);
 
   // Hide the start button and duration input
-  const startBtn = document.querySelector('.start-button');
   const inputBox = document.querySelector('.input-container');
   if (startBtn) startBtn.style.display = 'none';
   if (inputBox) inputBox.style.display = 'none';
@@ -48,13 +58,15 @@ function startContest() {
 
 function regenerateContest() {
   console.log('Regenerating contest...');
-  loadQuestions();
+  // reuse the same mix for this contest, or fallback to default if null
+  const mix = currentMix || getDefaultMix();
+  loadQuestions(mix);
 }
 
 function endContest() {
   console.log('Ending the contest...');
 
-  // Show the start button and duration input
+  // Show the start button and duration + difficulty inputs
   const startBtn = document.querySelector('.start-button');
   const inputBox = document.querySelector('.input-container');
   if (startBtn) {
@@ -78,9 +90,13 @@ function endContest() {
   // Clear the questions
   const qList = document.querySelector('.question-list');
   if (qList) qList.innerHTML = '';
+
+  currentMix = null;
 }
 
-function loadQuestions() {
+/* ---------- Question Loading / Display ---------- */
+
+function loadQuestions(mixOverride) {
   console.log('Loading questions...');
   fetch(DATA_PATH)
     .then(response => {
@@ -93,7 +109,12 @@ function loadQuestions() {
       if (!allRaw.length) throw new Error('Empty problems pool');
 
       // Read desired mix from JSON; fallback to 2E-2M-0H
-      const mix = (data.defaultContest && data.defaultContest.mix) || { easy: 2, medium: 2, hard: 0 };
+      const jsonMix =
+        (data.defaultContest && data.defaultContest.mix) ||
+        { easy: 2, medium: 2, hard: 0 };
+
+      // If caller passed a mix, prefer that; otherwise use JSON default
+      const mix = mixOverride || jsonMix;
 
       // Normalize difficulties to lower-case
       const pool = allRaw.map(p => ({
@@ -118,7 +139,10 @@ function loadQuestions() {
         // fallback: sample from whole pool for that difficulty
         const allByDiff = pool.filter(q => q.difficulty === diff);
         if (allByDiff.length < k) {
-          throw new Error(`Requested ${k} ${diff} but only ${allByDiff.length} available.`);
+          const msg = `Requested ${k} ${diff} but only ${allByDiff.length} available.`;
+          console.error(msg);
+          alert(msg);
+          return sampleUnique(allByDiff, allByDiff.length); // best effort
         }
         return sampleUnique(allByDiff, k);
       };
@@ -183,6 +207,43 @@ function toggleSolved(index) {
   const question = questions[index];
   if (!question) return;
   question.classList.toggle('solved');
+}
+
+/* ---------- Mix Helpers ---------- */
+
+function getDefaultMix() {
+  // Fallback defaults if JSON is missing defaultContest.mix
+  return { easy: 2, medium: 2, hard: 0 };
+}
+
+function readMixFromInputs() {
+  const defaults = getDefaultMix();
+
+  const easyInput   = document.getElementById('easyCount');
+  const mediumInput = document.getElementById('mediumCount');
+  const hardInput   = document.getElementById('hardCount');
+
+  const easyStr = easyInput?.value ?? String(defaults.easy);
+  const medStr  = mediumInput?.value ?? String(defaults.medium);
+  const hardStr = hardInput?.value ?? String(defaults.hard);
+
+  let easy   = parseInt(easyStr, 10);
+  let medium = parseInt(medStr, 10);
+  let hard   = parseInt(hardStr, 10);
+
+  // basic sanitization
+  if (!Number.isFinite(easy)   || easy   < 0) easy   = defaults.easy;
+  if (!Number.isFinite(medium) || medium < 0) medium = defaults.medium;
+  if (!Number.isFinite(hard)   || hard   < 0) hard   = defaults.hard;
+
+  if (easy + medium + hard === 0) {
+    alert('Total problems cannot be zero. Using defaults.');
+    easy   = defaults.easy;
+    medium = defaults.medium;
+    hard   = defaults.hard;
+  }
+
+  return { easy, medium, hard };
 }
 
 /* ---------- Utilities ---------- */
@@ -287,4 +348,3 @@ function updateTimerDisplay(seconds) {
 function stopTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = undefined;
-}
