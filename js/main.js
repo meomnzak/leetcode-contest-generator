@@ -33,13 +33,13 @@ function startContest() {
 
   const startBtn = document.querySelector('.start-button');
 
-  // NEW: read mix from input fields (easy / medium / hard)
+  // Read mix from input fields (easy / medium / hard)
   const mix = readMixFromInputs();
   currentMix = mix;
 
   loadQuestions(currentMix);
 
-  // Hide the start button and duration input
+  // Hide the start button and duration + difficulty inputs
   const inputBox = document.querySelector('.input-container');
   if (startBtn) startBtn.style.display = 'none';
   if (inputBox) inputBox.style.display = 'none';
@@ -212,7 +212,8 @@ function toggleSolved(index) {
 /* ---------- Mix Helpers ---------- */
 
 function getDefaultMix() {
-  // Fallback defaults if JSON is missing defaultContest.mix
+  // Fallback defaults if JSON defaultContest.mix is missing.
+  // These match your google_pool.json mix: 2 easy, 2 medium, 0 hard.
   return { easy: 2, medium: 2, hard: 0 };
 }
 
@@ -348,3 +349,4 @@ function updateTimerDisplay(seconds) {
 function stopTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = undefined;
+}
